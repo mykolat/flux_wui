@@ -1,5 +1,4 @@
 import torch
-import uuid
 from diffusers import FluxPipeline
 import ipywidgets as widgets
 from IPython.display import display, clear_output
@@ -7,72 +6,121 @@ import matplotlib.pyplot as plt
 from PIL import Image
 import io
 
-class FluxImageToImage:
-    def __init__(self):
-        self.pipe = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.bfloat16)
-        self.pipe.vae.enable_tiling()
-        self.pipe.enable_sequential_cpu_offload()
-        self.setup_widgets()
+def setup_pipeline_and_widgets():
+    # Initialize the pipeline for image-to-image
+    pipe = FluxPipeline.from_pretrained("black-forest-labs/FLUX.1-schnell", torch_dtype=torch.float16)
+    pipe.to("cuda")
+    pipe.vae.enable_tiling()
+    
+    clear_output()
+    
+    def set_generator(random, seed_value):
+        return torch.Generator("cuda").manual_seed(0) if random else torch.Generator("cuda").manual_seed(seed_value)
 
-    def setup_widgets(self):
-        self.html_widget = widgets.HTML(
-            value="<i>Made by <a href='https://www.youtube.com/@marat_ai' target='_blank'>marat_ai</a>, "
-                  "<a href='https://www.patreon.com/marat_ai' target='_blank'>more_notebooks</a></i>",
-            placeholder='Some HTML'
-        )
+    # Image upload widget
+    image_upload = widgets.FileUpload(
+        accept='image/*',
+        multiple=False,
+        description='Upload Image'
+    )
 
-        self.image_upload = widgets.FileUpload(accept='image/*', multiple=False, description='Upload Image')
-        self.prompt = widgets.Textarea(value='a cat', description='Prompt', layout=widgets.Layout(width='40%', height='100px'))
-        self.strength = widgets.FloatSlider(value=0.8, min=0, max=1, step=0.01, description='Strength')
-        self.num_inference_steps = widgets.IntText(value=4, min=1, max=50, description='Steps')
-        self.guidance_scale = widgets.FloatText(value=0.0, min=0, max=10, step=0.5, description='SFG scale')
-        self.seed = widgets.IntText(value=1, min=0, max=9999999999999999999999999, description='Seed')
-        self.random_seed = widgets.Checkbox(value=False, description='Random Seed')
-        self.generate_button = widgets.Button(description='Generate', tooltip='Generate image', icon='check')
-        self.output = widgets.Output()
+    # Prompt input
+    prompt = widgets.Textarea(
+        value='Transform the image into...',
+        description='Prompt',
+        disabled=False,
+        layout=widgets.Layout(width='50%', height='100px')
+    )
 
-        self.generate_button.on_click(self.generate_image)
+    # Number of inference steps
+    num_inference_steps = widgets.IntSlider(
+        value=4,
+        min=1,
+        max=50,
+        step=1,
+        description='Steps',
+        disabled=False
+    )
 
-    def set_generator(self):
-        seed_value = 0 if self.random_seed.value else self.seed.value
-        return torch.Generator("cpu").manual_seed(seed_value)
+    # Seed input
+    seed = widgets.IntText(
+        value=1,
+        min=0,
+        max=9999999999,
+        step=1,
+        description='Seed',
+        disabled=False
+    )
 
-    def generate_image(self, button):
-        with self.output:
+    # Random seed checkbox
+    random_seed = widgets.Checkbox(
+        value=False,
+        description='Random Seed',
+        disabled=False,
+        indent=False
+    )
+
+    # Generate button
+    generate_button = widgets.Button(
+        description='Generate',
+        disabled=False,
+        button_style='',
+        tooltip='Generate image',
+        icon='check'
+    )
+
+    # Output widget for the image
+    output = widgets.Output()
+
+    def generate_image(button):
+        with output:
             clear_output(wait=True)
-            if not self.image_upload.value:
+            if not image_upload.value:
                 print("Please upload an image first.")
                 return
+
+            # Debug logging to check upload value
+            print("image_upload.value:", image_upload.value)
             
             try:
-                image_file = next(iter(self.image_upload.value.values()))
-                init_image = Image.open(io.BytesIO(image_file['content']))
+                uploaded_file = list(image_upload.value.values())[0]
+                content = uploaded_file['content']
+                input_image = Image.open(io.BytesIO(content))
+                generator = set_generator(random_seed.value, seed.value)
                 
-                generator = self.set_generator()
-                image = self.pipe(
-                    prompt=self.prompt.value,
-                    image=init_image,
-                    strength=self.strength.value,
-                    num_inference_steps=self.num_inference_steps.value,
-                    guidance_scale=self.guidance_scale.value,
+                result = pipe(
+                    prompt=prompt.value,
+                    image=input_image,
+                    num_inference_steps=num_inference_steps.value,
                     generator=generator
                 ).images[0]
-                
-                uid = uuid.uuid4()
-                image.save(f"{uid}.png")
 
-                plt.figure(figsize=(10, 10))
-                plt.imshow(image)
+                plt.figure(figsize=(10, 5))
+                plt.subplot(1, 2, 1)
+                plt.imshow(input_image)
+                plt.title("Input Image")
                 plt.axis('off')
+                
+                plt.subplot(1, 2, 2)
+                plt.imshow(result)
+                plt.title("Generated Image")
+                plt.axis('off')
+                
+                plt.tight_layout()
                 plt.show()
             except Exception as e:
                 print(f"An error occurred: {str(e)}")
 
-    def display(self):
-        display(self.html_widget, self.image_upload, self.prompt, self.strength, 
-                self.num_inference_steps, self.guidance_scale, self.seed, 
-                self.random_seed, self.generate_button, self.output)
+    generate_button.on_click(generate_image)
 
-def setup_flux_image_to_image():
-    flux = FluxImageToImage()
-    flux.display()
+    # Display the widgets and output
+    display(widgets.VBox([
+        image_upload,
+        prompt,
+        widgets.HBox([num_inference_steps, seed, random_seed]),
+        generate_button,
+        output
+    ]))
+
+if __name__ == "__main__":
+    setup_pipeline_and_widgets()
